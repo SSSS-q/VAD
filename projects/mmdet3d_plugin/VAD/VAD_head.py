@@ -134,6 +134,7 @@ class VADHead(DETRHead):
                  dis_thresh=0.2,
                  pe_normalization=True,
                  ego_his_encoder=None,
+                 vlm_his_encoder=None,
                  ego_fut_mode=3,
                  loss_plan_reg=dict(type='L1Loss', loss_weight=0.25),
                  loss_plan_bound=dict(type='PlanMapBoundLoss', loss_weight=0.1),
@@ -145,6 +146,7 @@ class VADHead(DETRHead):
                  query_use_fix_pad=None,
                  ego_lcf_feat_idx=None,
                  valid_fut_ts=6,
+                 vlm_traj_weight=0.5,
                  **kwargs):
 
         self.bev_h = bev_h
@@ -162,6 +164,7 @@ class VADHead(DETRHead):
         self.dis_thresh = dis_thresh
         self.pe_normalization = pe_normalization
         self.ego_his_encoder = ego_his_encoder
+        self.vlm_his_encoder = vlm_his_encoder
         self.ego_fut_mode = ego_fut_mode
         self.ego_agent_decoder = ego_agent_decoder
         self.ego_map_decoder = ego_map_decoder
@@ -169,6 +172,7 @@ class VADHead(DETRHead):
         self.query_use_fix_pad = query_use_fix_pad
         self.ego_lcf_feat_idx = ego_lcf_feat_idx
         self.valid_fut_ts = valid_fut_ts
+        self.vlm_traj_weight = vlm_traj_weight
 
         if loss_traj_cls['use_sigmoid'] == True:
             self.traj_num_cls = 1
@@ -402,7 +406,9 @@ class VADHead(DETRHead):
         if self.ego_his_encoder is not None:
             self.ego_his_encoder = LaneNet(2, self.embed_dims//2, 3)
         else:
-            self.ego_query = nn.Embedding(1, self.embed_dims)	
+            self.ego_query = nn.Embedding(1, self.embed_dims)
+        if self.vlm_his_encoder is not None:
+            self.vlm_his_encoder = LaneNet(2, self.embed_dims//2, 3)
 
         if self.ego_agent_decoder is not None:
             self.ego_agent_decoder = build_transformer_layer_sequence(self.ego_agent_decoder)
@@ -467,6 +473,10 @@ class VADHead(DETRHead):
             for p in self.ego_his_encoder.parameters():
                 if p.dim() > 1:
                     nn.init.xavier_uniform_(p)
+        if self.vlm_his_encoder is not None:
+            for p in self.vlm_his_encoder.parameters():
+                if p.dim() > 1:
+                    nn.init.xavier_uniform_(p)
         if self.ego_agent_decoder is not None:
             for p in self.ego_agent_decoder.parameters():
                 if p.dim() > 1:
@@ -485,6 +495,7 @@ class VADHead(DETRHead):
                 only_bev=False,
                 ego_his_trajs=None,
                 ego_lcf_feat=None,
+                vlm_trajs=None,
             ):
         """Forward function.
         Args:
@@ -492,7 +503,9 @@ class VADHead(DETRHead):
                 network, each is a 5D-tensor with shape
                 (B, N, C, H, W).
             prev_bev: previous bev featues
-            only_bev: only compute BEV features with encoder. 
+            only_bev: only compute BEV features with encoder.
+            vlm_trajs: optional coarse trajectory from VLM with shape
+                (B, 1, T, 2) where ``T`` matches ``ego_his_trajs`` length.
         Returns:
             all_cls_scores (Tensor): Outputs from the classification head, \
                 shape [nb_dec, bs, num_query, cls_out_channels]. Note \
@@ -709,7 +722,23 @@ class VADHead(DETRHead):
         # planning
         (batch, num_agent) = motion_hs.shape[:2]
         if self.ego_his_encoder is not None:
-            ego_his_feats = self.ego_his_encoder(ego_his_trajs)  # [B, 1, dim]
+            ego_his_feats = self.ego_his_encoder(ego_his_trajs)
+            if vlm_trajs is not None:
+                # ensure temporal length matches history trajectories
+                t_len = ego_his_trajs.shape[2]
+                if vlm_trajs.shape[2] < t_len:
+                    pad = vlm_trajs.new_zeros(
+                        vlm_trajs.shape[0], vlm_trajs.shape[1],
+                        t_len - vlm_trajs.shape[2], 2)
+                    vlm_trajs = torch.cat([vlm_trajs, pad], dim=2)
+                elif vlm_trajs.shape[2] > t_len:
+                    vlm_trajs = vlm_trajs[:, :, :t_len, :]
+                if self.vlm_his_encoder is not None:
+                    vlm_feats = self.vlm_his_encoder(vlm_trajs)
+                else:
+                    vlm_feats = self.ego_his_encoder(vlm_trajs)
+                ego_his_feats = (1 - self.vlm_traj_weight) * ego_his_feats + \
+                                 self.vlm_traj_weight * vlm_feats
         else:
             ego_his_feats = self.ego_query.weight.unsqueeze(0).repeat(batch, 1, 1)
         # Interaction
