@@ -205,6 +205,7 @@ class VAD(MVXTwoStageDetector):
                       ego_fut_masks=None,
                       ego_fut_cmd=None,
                       ego_lcf_feat=None,
+                      vlm_trajs=None,
                       gt_attr_labels=None
                       ):
         """Forward training function.
@@ -227,6 +228,8 @@ class VAD(MVXTwoStageDetector):
                 used for training Fast RCNN. Defaults to None.
             gt_bboxes_ignore (list[torch.Tensor], optional): Ground truth
                 2D boxes in images to be ignored. Defaults to None.
+            vlm_trajs (list[torch.Tensor], optional): VLM trajectories used
+                for training. Defaults to None.
         Returns:
             dict: Losses of different branches.
         """
@@ -248,7 +251,8 @@ class VAD(MVXTwoStageDetector):
                                             gt_bboxes_ignore, map_gt_bboxes_ignore, prev_bev,
                                             ego_his_trajs=ego_his_trajs, ego_fut_trajs=ego_fut_trajs,
                                             ego_fut_masks=ego_fut_masks, ego_fut_cmd=ego_fut_cmd,
-                                            ego_lcf_feat=ego_lcf_feat, gt_attr_labels=gt_attr_labels)
+                                            ego_lcf_feat=ego_lcf_feat, vlm_trajs=vlm_trajs,
+                                            gt_attr_labels=gt_attr_labels)
 
         losses.update(losses_pts)
         return losses
