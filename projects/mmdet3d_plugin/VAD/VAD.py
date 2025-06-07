@@ -120,6 +120,7 @@ class VAD(MVXTwoStageDetector):
                           ego_fut_masks=None,
                           ego_fut_cmd=None,
                           ego_lcf_feat=None,
+                          vlm_trajs=None,
                           gt_attr_labels=None):
         """Forward function'
         Args:
@@ -132,12 +133,16 @@ class VAD(MVXTwoStageDetector):
             gt_bboxes_ignore (list[torch.Tensor], optional): Ground truth
                 boxes to be ignored. Defaults to None.
             prev_bev (torch.Tensor, optional): BEV features of previous frame.
+            vlm_trajs (Tensor, optional): VLM-provided coarse trajectory
+                with shape (B, 1, T, 2) where ``T`` matches history length.
         Returns:
             dict: Losses of each branch.
         """
 
         outs = self.pts_bbox_head(pts_feats, img_metas, prev_bev,
-                                  ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat)
+                                  ego_his_trajs=ego_his_trajs,
+                                  ego_lcf_feat=ego_lcf_feat,
+                                  vlm_trajs=vlm_trajs)
         loss_inputs = [
             gt_bboxes_3d, gt_labels_3d, map_gt_bboxes_3d, map_gt_labels_3d,
             outs, ego_fut_trajs, ego_fut_masks, ego_fut_cmd, gt_attr_labels
@@ -205,6 +210,7 @@ class VAD(MVXTwoStageDetector):
                       ego_fut_masks=None,
                       ego_fut_cmd=None,
                       ego_lcf_feat=None,
+                      vlm_trajs=None,
                       gt_attr_labels=None
                       ):
         """Forward training function.
@@ -227,6 +233,8 @@ class VAD(MVXTwoStageDetector):
                 used for training Fast RCNN. Defaults to None.
             gt_bboxes_ignore (list[torch.Tensor], optional): Ground truth
                 2D boxes in images to be ignored. Defaults to None.
+            vlm_trajs (Tensor, optional): VLM-provided coarse trajectory
+                with shape (B, 1, T, 2) matching ``ego_his_trajs``.
         Returns:
             dict: Losses of different branches.
         """
@@ -248,7 +256,8 @@ class VAD(MVXTwoStageDetector):
                                             gt_bboxes_ignore, map_gt_bboxes_ignore, prev_bev,
                                             ego_his_trajs=ego_his_trajs, ego_fut_trajs=ego_fut_trajs,
                                             ego_fut_masks=ego_fut_masks, ego_fut_cmd=ego_fut_cmd,
-                                            ego_lcf_feat=ego_lcf_feat, gt_attr_labels=gt_attr_labels)
+                                            ego_lcf_feat=ego_lcf_feat, vlm_trajs=vlm_trajs,
+                                            gt_attr_labels=gt_attr_labels)
 
         losses.update(losses_pts)
         return losses
@@ -263,6 +272,7 @@ class VAD(MVXTwoStageDetector):
         ego_fut_trajs=None,
         ego_fut_cmd=None,
         ego_lcf_feat=None,
+        vlm_trajs=None,
         gt_attr_labels=None,
         **kwargs
     ):
@@ -326,10 +336,16 @@ class VAD(MVXTwoStageDetector):
         ego_fut_trajs=None,
         ego_fut_cmd=None,
         ego_lcf_feat=None,
+        vlm_trajs=None,
         gt_attr_labels=None,
         **kwargs
     ):
-        """Test function without augmentaiton."""
+        """Test function without augmentaiton.
+
+        Args:
+            vlm_trajs (Tensor, optional): VLM-provided coarse trajectory
+                with shape (B, 1, T, 2) matching ``ego_his_trajs``.
+        """
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
         bbox_list = [dict() for i in range(len(img_metas))]
         new_prev_bev, bbox_pts, metric_dict = self.simple_test_pts(
@@ -345,6 +361,7 @@ class VAD(MVXTwoStageDetector):
             ego_fut_trajs=ego_fut_trajs,
             ego_fut_cmd=ego_fut_cmd,
             ego_lcf_feat=ego_lcf_feat,
+            vlm_trajs=vlm_trajs,
             gt_attr_labels=gt_attr_labels,
         )
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
@@ -367,9 +384,15 @@ class VAD(MVXTwoStageDetector):
         ego_fut_trajs=None,
         ego_fut_cmd=None,
         ego_lcf_feat=None,
+        vlm_trajs=None,
         gt_attr_labels=None,
     ):
-        """Test function"""
+        """Test function.
+
+        Args:
+            vlm_trajs (Tensor, optional): VLM-provided coarse trajectory
+                with shape (B, 1, T, 2) matching ``ego_his_trajs``.
+        """
         mapped_class_names = [
             'car', 'truck', 'construction_vehicle', 'bus',
             'trailer', 'barrier', 'motorcycle', 'bicycle', 
@@ -377,7 +400,9 @@ class VAD(MVXTwoStageDetector):
         ]
 
         outs = self.pts_bbox_head(x, img_metas, prev_bev=prev_bev,
-                                  ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat)
+                                  ego_his_trajs=ego_his_trajs,
+                                  ego_lcf_feat=ego_lcf_feat,
+                                  vlm_trajs=vlm_trajs)
         bbox_list = self.pts_bbox_head.get_bboxes(outs, img_metas, rescale=rescale)
 
         bbox_results = []
